@@ -2,98 +2,86 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"fmt"
-	"image/png"
-	"os"
-	"strings"
-
 	"github.com/boombuler/barcode"
 	"github.com/boombuler/barcode/code128"
+	"github.com/boombuler/barcode/qr"
 	"github.com/fogleman/gg"
+	"github.com/spf13/cobra"
+	"image/png"
+	"os"
 )
 
 const (
-	width  = 512
-	height = 128
+	width       = 512
+	height      = 128
+	qrCodeWidth = 200
 )
 
-// serializeGrCommand serializes Graphics Protocol command.
-func serializeGrCommand(cmd map[string]string, payload []byte) []byte {
-	res := []byte("\033_G")
-	args := []string{}
-	for k, v := range cmd {
-		args = append(args, fmt.Sprintf("%s=%s", k, v))
-	}
+var rootCmd = &cobra.Command{Use: "app"}
 
-	res = append(res, []byte(strings.Join(args, ","))...)
-	if len(payload) > 0 {
-		res = append(res, ';')
-		res = append(res, payload...)
-	}
-	res = append(res, '\033', '\\')
-	return res
+var cmdGenerateQR = &cobra.Command{
+	Use:   "qrcode [string]",
+	Short: "Generate QR code from string",
+	Args:  cobra.ExactArgs(1),
+	Run:   generateQR,
 }
 
-// writeChunked writes chunked Graphics Protocol command.
-func writeChunked(cmd map[string]string, data []byte) {
-	encoded := base64.StdEncoding.EncodeToString(data)
-	const blockSize = 4096
-	for len(encoded) > 0 {
-		var block string
-		if len(encoded) > blockSize {
-			block, encoded = encoded[:blockSize], encoded[blockSize:]
-		} else {
-			block, encoded = encoded, ""
-			cmd["m"] = "0"
-		}
-		payload := []byte(block)
-		_, _ = os.Stdout.Write(serializeGrCommand(cmd, payload))
-		cmd = make(map[string]string)
-	}
-}
-
-// outputPng outputs PNG image to Kitty Terminal.
-func outputPng(s []byte) {
-	cmd := map[string]string{
-		"a": "T",
-		"f": "100",
-		"m": "1",
-	}
-	writeChunked(cmd, s)
+var cmdGenerateBarcode = &cobra.Command{
+	Use:   "barcode [string]",
+	Short: "Generate Barcode from string",
+	Args:  cobra.ExactArgs(1),
+	Run:   generateBarcode,
 }
 
 func main() {
-	// Check for command line argument
-	if len(os.Args) < 2 {
-		panic("Usage: go run <program_name.go> (string to encode)")
-	}
+	rootCmd.AddCommand(cmdGenerateQR)
+	rootCmd.AddCommand(cmdGenerateBarcode)
+	err := rootCmd.Execute()
+	cobra.CheckErr(err)
+}
 
-	// Generate a barcode
-	bc, err := code128.Encode(os.Args[1])
+func generateQR(cmd *cobra.Command, args []string) {
+	code, err := qr.Encode(args[0], qr.H, qr.Auto)
 	if err != nil {
-		panic(err)
+		fmt.Println("Failed to encode string to QR code:", err)
+		os.Exit(1)
 	}
 
-	// Scale the barcode to fit
+	code, err = barcode.Scale(code, qrCodeWidth, qrCodeWidth)
+
+	var buffer bytes.Buffer
+	err = png.Encode(&buffer, code)
+	if err != nil {
+		fmt.Println("Failed to encode QR code to PNG:", err)
+		os.Exit(1)
+	}
+
+	outputPng(buffer.Bytes())
+}
+
+func generateBarcode(jmd *cobra.Command, args []string) {
+	bc, err := code128.Encode(args[0])
+	if err != nil {
+		fmt.Println("Failed to encode string to Barcode:", err)
+		os.Exit(1)
+	}
 	bc2, err := barcode.Scale(bc, width, height)
 	if err != nil {
-		panic(err)
+		fmt.Println("Failed to scale Barcode:", err)
+		os.Exit(1)
 	}
-
-	// Draw the barcode to an image
 	img := gg.NewContext(width, height)
 	img.DrawRectangle(0, 0, float64(width), float64(height))
 	img.Fill()
-
 	img.DrawImage(bc2, 0, 0)
 
-	// Create a buffer to hold the PNG data
-	imgBuffer := new(bytes.Buffer)
-	err = png.Encode(imgBuffer, img.Image())
+	var buffer bytes.Buffer
+	err = png.Encode(&buffer, img.Image())
 	if err != nil {
-		panic(err)
+		fmt.Println("Failed to encode Barcode to PNG:", err)
+		os.Exit(1)
 	}
 
-	outputPng(imgBuffer.Bytes())
+	outputPng(buffer.Bytes())
 }
