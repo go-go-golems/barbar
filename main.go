@@ -36,6 +36,7 @@ var cmdGenerateBarcode = &cobra.Command{
 
 func main() {
 	rootCmd.AddCommand(cmdGenerateQR)
+	cmdGenerateQR.Flags().StringP("output", "o", "", "output file")
 	rootCmd.AddCommand(cmdGenerateBarcode)
 	err := rootCmd.Execute()
 	cobra.CheckErr(err)
@@ -55,6 +56,12 @@ func generateQR(cmd *cobra.Command, args []string) {
 	if err != nil {
 		fmt.Println("Failed to encode QR code to PNG:", err)
 		os.Exit(1)
+	}
+
+	if output, _ := cmd.Flags().GetString("output"); output != "" {
+		err := os.WriteFile(output, buffer.Bytes(), 0644)
+		cobra.CheckErr(err)
+		return
 	}
 
 	outputPng(buffer.Bytes())
